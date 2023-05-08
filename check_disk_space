@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Definir variables
+THRESHOLD=90
+WEBHOOK_URL="https://xxxxx.webhook.office.com/xxxxxxxxxxxxxxx"
+HOSTNAME=$(hostname)
+
+# Obtener el espacio libre en disco de todos los discos que empiezan por /dev
+DISK_USAGE=$(df -h | awk '/^\/dev/ { sub("%", "", $(NF-1)); if ($NF != "/") print $NF " " $(NF-1); else print "root " $(NF-1); }')
+
+# Comprobar si el espacio libre en disco supera el umbral en alguno de los discos
+while read -r DISK; do
+  DISK_NAME=$(echo $DISK | cut -d ' ' -f 1)
+  DISK_PERCENTAGE=$(echo $DISK | cut -d ' ' -f 2)
+  # crear una variable $DISK_NAME sin /
+  DISK_NAME_NO_SLASH=$(echo $DISK_NAME | sed 's/\///g')
+
+  if [ $DISK_PERCENTAGE -ge $THRESHOLD ]; then
+
+    # Comprobar si ya se ha enviado un mensaje
+    if [ ! -f /tmp/disk_alert_sent_$DISK_NAME_NO_SLASH ]; then
+
+      # Enviar mensaje de alerta a webhook de Teams
+      MESSAGE="Alerta! El servidor $HOSTNAME tiene un espacio en disco utilizado del $DISK_PERCENTAGE% en el disco $DISK_NAME."
+      PAYLOAD="{
+        \"@type\": \"MessageCard\",
+        \"@context\": \"http://schema.org/extensions\",
+        \"themeColor\": \"FF0000\",
+        \"summary\": \"$MESSAGE\",
+        \"sections\": [
+          {
+            \"activityTitle\": \"$MESSAGE\",
+            \"activitySubtitle\": \"Espacio en disco utilizado\",
+            \"facts\": [
+              {
+                \"name\": \"Servidor\",
+                \"value\": \"$HOSTNAME\"
+              },
+              {
+                \"name\": \"Disco\",
+                \"value\": \"$DISK_NAME\"
+              },
+              {
+                \"name\": \"Espacio utilizado\",
+                \"value\": \"$DISK_PERCENTAGE%\"
+              }
+            ]
+          }
+        ]
+      }"
+      curl -H "Content-Type: application/json" -d "$PAYLOAD" $WEBHOOK_URL
+
+      # Marcar que ya se ha enviado el mensaje
+      touch /tmp/disk_alert_sent_$DISK_NAME_NO_SLASH
+
+    fi
+  else
+
+    # Comprobar si ya se ha enviado un mensaje
+    if [ -f /tmp/disk_alert_sent_$DISK_NAME_NO_SLASH ]; then
+
+      # Enviar mensaje de resolución a webhook de Teams
+      MESSAGE="El servidor $HOSTNAME ha solucionado el problema de espacio en disco en el disco $DISK_NAME."
+      PAYLOAD="{
+        \"@type\": \"MessageCard\",
+        \"@context\": \"http://schema.org/extensions\",
+        \"themeColor\": \"0078D7\",
+        \"summary\": \"$MESSAGE\",
+        \"sections\": [
+          {
+            \"activityTitle\": \"$MESSAGE\",
+            \"activitySubtitle\": \"Espacio en disco utilizado\",
+            \"facts\": [
+              {
+                \"name\": \"Servidor\",
+                \"value\": \"$HOSTNAME\"
+              },
+              {
+                \"name\": \"Disco\",
+                \"value\": \"$DISK_NAME\"
+              },
+              {
+                \"name\": \"Espacio utilizado\",
+                \"value\": \"$DISK_PERCENTAGE%\"
+              }
+            ]
+          }
+        ]
+      }"
+      curl -H "Content-Type: application/json" -d "$PAYLOAD" $WEBHOOK_URL
+
+      # borrar el fichero de marca
+      rm /tmp/disk_alert_sent_$DISK_NAME_NO_SLASH
+
+    fi
+  fi
+
+done <<< "$DISK_USAGE"
+
